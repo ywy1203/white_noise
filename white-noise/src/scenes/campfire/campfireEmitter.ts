@@ -1,139 +1,167 @@
 /**
- * 篝火场景发射器配置 v3
- * 三层粒子分级 + 高密度 + isMobile 降级
+ * 篝火场景 · 粒子系统 v4
+ * 火焰曲面排布模式：粒子沿火焰轮廓函数密集排列，形成连贯火体
+ * 而非随机散射的离散光点
  */
-import type { ParticleData, EmitterConfig } from '@/types/particle'
-import { Emitter } from '@/services/particleSystem'
+import type { ParticleData } from '@/types/particle'
+import { perlin2 } from '@/services/particleSystem'
 
 // ============================================================
-//  核心层（焰心）：暖亮黄，小尺寸，慢速
+//  火焰轮廓函数 —— 定义火舌外形
 // ============================================================
-function coreConfig(isMobile: boolean): EmitterConfig {
-  const n = isMobile ? 0.5 : 1
+// 类高斯外形：底部宽、中间微收、顶部尖
+function flameProfile(t: number): number {
+  // t: 0=底部 1=火焰最高点
+  const bell = Math.exp(-t * t * 2.5)  // 底部=1, 顶部≈0
+  const tip = Math.max(0, 1 - t * 2.0)   // 上半部收尖
+  return t < 0.6 ? bell : tip * bell
+}
+
+// ============================================================
+//  生成火焰粒子（密集曲面排布）
+// ============================================================
+function createFlameParticles(
+  count: number,
+  flameHeight: number,
+  baseRadius: number,
+  seed: number,
+): ParticleData[] {
+  let s = seed
+  const rng = () => { s = (s * 1664525 + 1013904223) & 0x7fffffff; return s / 0x7fffffff }
+
+  const particles: ParticleData[] = []
+
+  for (let i = 0; i < count; i++) {
+    // 沿高度分布：偏底部（对数分布）
+    const t = Math.pow(rng(), 0.45)
+    const y = t * flameHeight
+    const maxR = flameProfile(t) * baseRadius
+
+    // 在圆截面内：高斯分布（中心密、边缘疏）
+    const gaussR = Math.sqrt(-2 * Math.log(Math.max(0.01, rng()))) * 0.5  // 高斯 falloff
+    const radius = Math.min(maxR, gaussR * maxR)
+    const angle = rng() * Math.PI * 2
+
+    const x = Math.cos(angle) * radius
+    const z = Math.sin(angle) * radius
+
+    // 微小位置抖动（0.02 单位）
+    const jitter = 0.02
+    const px = x + (rng() - 0.5) * jitter
+    const py = y + (rng() - 0.5) * jitter
+    const pz = z + (rng() - 0.5) * jitter
+
+    // 每帧的运动：垂直上升 + 水平渐扩
+    const riseSpeed = 1.0 + rng() * 0.8
+    const spread = radius / (flameHeight * 0.5 + 1)
+
+    // 颜色：底部暖亮 → 顶部橙红
+    const hue = 0.12 + t * 0.07           // 黄→橙
+    const sat = 1.0
+    const val = 1.0 - t * 0.5             // 亮→暗
+    const [r, g, b] = hsvToRgb(hue, sat, val)
+
+    // Alpha: 密度分布 中心亮 边缘淡
+    const alpha = 0.55 + (1 - gaussR) * 0.35
+
+    particles.push({
+      x: px, y: py, z: pz,
+      vx: spread * riseSpeed * (rng() - 0.5) * 0.1,
+      vy: riseSpeed,
+      vz: spread * riseSpeed * (rng() - 0.5) * 0.1,
+      r, g, b,
+      a: alpha,
+      size: 2.5 + rng() * 4,
+      layerId: 'flame',
+      phase: rng() * Math.PI * 2,
+      age: rng() * 2.5,       // 错峰出生
+      lifespan: 1.5 + rng() * 1.0,
+      startSize: 1.5, peakSize: 4.0, endSize: 1.0,
+      startColor: [r, g, b],
+      endColor: [r, g, b],
+    })
+  }
+  return particles
+}
+
+// ============================================================
+//  生成火星（从火焰顶部区域出发）
+// ============================================================
+function createSparkParticles(
+  count: number,
+  flameHeight: number,
+  baseRadius: number,
+  seed: number,
+): ParticleData[] {
+  let s = seed
+  const rng = () => { s = (s * 1664525 + 1013904223) & 0x7fffffff; return s / 0x7fffffff }
+
+  const particles: ParticleData[] = []
+  for (let i = 0; i < count; i++) {
+    const t = 0.7 + rng() * 0.3           // 从火焰中上段出发
+    const startY = t * flameHeight
+    const maxR = flameProfile(t) * baseRadius * 0.8
+    const angle = rng() * Math.PI * 2
+    const radius = Math.sqrt(rng()) * maxR
+
+    const x = Math.cos(angle) * radius
+    const z = Math.sin(angle) * radius
+
+    const [r, g, b] = [255, 220 + rng() * 35, 100 + rng() * 80]
+
+    particles.push({
+      x, y: startY, z,
+      vx: (rng() - 0.5) * 0.3,
+      vy: 0.3 + rng() * 0.5,
+      vz: (rng() - 0.5) * 0.3,
+      r, g, b,
+      a: 0.7,
+      size: 0.5 + rng() * 1.0,
+      layerId: 'spark',
+      phase: rng() * Math.PI * 2,
+      age: rng() * 4.0,
+      lifespan: 3.0 + rng() * 2.0,
+      startSize: 0.3, peakSize: 1.0, endSize: 0.1,
+      startColor: [r, g, b],
+      endColor: [r, g, b],
+    })
+  }
+  return particles
+}
+
+// ============================================================
+//  主创建函数：不再使用 Emitter 类
+//  而是直接生成火焰曲面粒子 + 火星 + 木柴
+//  每帧在引擎中通过 TurbulenceField 更新
+// ============================================================
+
+export interface CampfireLayers {
+  flame: ParticleData[]
+  spark: ParticleData[]
+  dust: ParticleData[]
+  log: ParticleData[]
+}
+
+export function createCampfireParticles(isMobile: boolean = false): CampfireLayers {
+  const m = isMobile ? 0.4 : 1
+  const flameCount = Math.round(10000 * m)
+  const sparkCount = Math.round(60 * m)
+  const dustCount = Math.round(300 * m)
+
+  const flameHeight = 3.5
+  const baseRadius = 1.0
+
   return {
-    layerId: 'flame',
-    maxParticles: Math.round(800 * n),
-    spawnRate: Math.round(300 * n),
-    shape: 'cone',
-    coneBottomRadius: 0.1, coneTopRadius: 0.05, coneHeight: 0.1,
-    boxSize: [0, 0, 0], sphereRadius: 0,
-    baseSpeed: 0.8, speedSpread: 0.3,
-    spreadAngle: 0.1, turbulenceAmp: 0.15, turbulenceFreq: 0.3, gravity: -0.2,
-    lifespan: 1.5, lifespanSpread: 0.5,
-    startSize: 0.5, peakSize: 1.5, peakAgeRatio: 0.3, endSize: 0.5,
-    startColor: [255, 235, 180], midColor: [255, 220, 120], endColor: [255, 180, 80],
-    startAlpha: 0.8, midAlpha: 0.9, endAlpha: 0.3,
+    flame: createFlameParticles(flameCount, flameHeight, baseRadius, 42),
+    spark: createSparkParticles(sparkCount, flameHeight, baseRadius, 420),
+    dust: [],
+    log: [],
   }
 }
 
 // ============================================================
-//  主体层（火焰主体）：暖金黄，中尺寸
+//  木柴生成（作为静态层，不随粒子更新循环）
 // ============================================================
-function bodyConfig(isMobile: boolean): EmitterConfig {
-  const n = isMobile ? 0.5 : 1
-  return {
-    layerId: 'flame',
-    maxParticles: Math.round(3500 * n),
-    spawnRate: Math.round(800 * n),
-    shape: 'cone',
-    coneBottomRadius: 0.2, coneTopRadius: 0.05, coneHeight: 0.15,
-    boxSize: [0, 0, 0], sphereRadius: 0,
-    baseSpeed: 1.2, speedSpread: 0.4,
-    spreadAngle: 0.15, turbulenceAmp: 0.3, turbulenceFreq: 0.35, gravity: -0.15,
-    lifespan: 2.0, lifespanSpread: 0.6,
-    startSize: 1.0, peakSize: 3.0, peakAgeRatio: 0.4, endSize: 1.0,
-    startColor: [255, 210, 100], midColor: [255, 180, 60], endColor: [220, 120, 40],
-    startAlpha: 0.6, midAlpha: 0.7, endAlpha: 0.15,
-  }
-}
-
-// ============================================================
-//  外层（外焰）：橙红半透明，大尺寸，快速
-// ============================================================
-function outerConfig(isMobile: boolean): EmitterConfig {
-  const n = isMobile ? 0.5 : 1
-  return {
-    layerId: 'flame',
-    maxParticles: Math.round(800 * n),
-    spawnRate: Math.round(300 * n),
-    shape: 'cone',
-    coneBottomRadius: 0.25, coneTopRadius: 0.08, coneHeight: 0.2,
-    boxSize: [0, 0, 0], sphereRadius: 0,
-    baseSpeed: 1.8, speedSpread: 0.5,
-    spreadAngle: 0.25, turbulenceAmp: 0.4, turbulenceFreq: 0.3, gravity: -0.1,
-    lifespan: 2.5, lifespanSpread: 0.8,
-    startSize: 2.0, peakSize: 5.0, peakAgeRatio: 0.5, endSize: 2.0,
-    startColor: [255, 140, 50], midColor: [230, 100, 40], endColor: [180, 60, 20],
-    startAlpha: 0.25, midAlpha: 0.35, endAlpha: 0.05,
-  }
-}
-
-// ============================================================
-//  火星（从火焰顶部缓慢飘出）
-// ============================================================
-function sparkConfig(isMobile: boolean): EmitterConfig {
-  const n = isMobile ? 0.6 : 1
-  return {
-    layerId: 'spark',
-    maxParticles: Math.round(80 * n),
-    spawnRate: Math.round(12 * n),
-    shape: 'cone',
-    coneBottomRadius: 0.4, coneTopRadius: 0.2, coneHeight: 2.5,
-    boxSize: [0, 0, 0], sphereRadius: 0,
-    baseSpeed: 0.4, speedSpread: 0.2,
-    spreadAngle: 0.2, turbulenceAmp: 0.1, turbulenceFreq: 0.2, gravity: -0.05,
-    lifespan: 4.0, lifespanSpread: 1.5,
-    startSize: 0.3, peakSize: 1.0, peakAgeRatio: 0.3, endSize: 0.1,
-    startColor: [255, 230, 150], midColor: [255, 190, 90], endColor: [200, 120, 40],
-    startAlpha: 0.6, midAlpha: 0.4, endAlpha: 0,
-  }
-}
-
-// ============================================================
-//  环境尘埃（极淡悬浮）
-// ============================================================
-function dustConfig(isMobile: boolean): EmitterConfig {
-  const n = isMobile ? 0.5 : 1
-  return {
-    layerId: 'dust',
-    maxParticles: Math.round(400 * n),
-    spawnRate: Math.round(30 * n),
-    shape: 'box',
-    coneBottomRadius: 0, coneTopRadius: 0, coneHeight: 0,
-    boxSize: [6, 4, 5], sphereRadius: 0,
-    baseSpeed: 0.05, speedSpread: 0.03,
-    spreadAngle: 0, turbulenceAmp: 0.03, turbulenceFreq: 0.08, gravity: 0,
-    lifespan: 40, lifespanSpread: 15,
-    startSize: 0.3, peakSize: 0.6, peakAgeRatio: 0.5, endSize: 0.2,
-    startColor: [255, 180, 100], midColor: [255, 160, 80], endColor: [200, 120, 60],
-    startAlpha: 0.015, midAlpha: 0.03, endAlpha: 0.005,
-  }
-}
-
-// ============================================================
-//  主创建函数
-// ============================================================
-
-export function createCampfireEmitters(isMobile: boolean = false, seed: number = 42): Emitter[] {
-  const core = new Emitter(coreConfig(isMobile), seed)
-  const body = new Emitter(bodyConfig(isMobile), seed + 100)
-  const outer = new Emitter(outerConfig(isMobile), seed + 200)
-  const spark = new Emitter(sparkConfig(isMobile), seed + 300)
-  const dust = new Emitter(dustConfig(isMobile), seed + 400)
-
-  core.init()
-  body.init()
-  outer.init()
-  spark.init()
-  dust.init()
-
-  return [core, body, outer, spark, dust]
-}
-
-// ============================================================
-//  木柴生成
-// ============================================================
-
 export function generateLogs(isMobile: boolean = false, rngSeed: number = 42): ParticleData[] {
   const rng = (() => {
     let s = rngSeed + 500
@@ -141,13 +169,13 @@ export function generateLogs(isMobile: boolean = false, rngSeed: number = 42): P
   })()
 
   const logs: ParticleData[] = []
+  const perLog = isMobile ? 1000 : 1800
   const logPositions = [
     { cx: -0.5, cy: -1.6, cz: 0.2, len: 2.8, thick: 0.5 },
     { cx: 0.6, cy: -1.3, cz: -0.2, len: 2.2, thick: 0.4 },
     { cx: -0.1, cy: -1.0, cz: 0.4, len: 2.5, thick: 0.35 },
   ]
 
-  const perLog = isMobile ? 1200 : 2000
   for (const lp of logPositions) {
     for (let i = 0; i < perLog; i++) {
       const along = (rng() - 0.5) * lp.len
@@ -157,30 +185,151 @@ export function generateLogs(isMobile: boolean = false, rngSeed: number = 42): P
       const y = lp.cy + Math.cos(ang) * r
       const z = lp.cz + Math.sin(ang) * r
 
-      let rC: number, gC: number, bC: number
+      let rc: number, gc: number, bc: number
       const isFireSide = rng() < 0.2
       if (isFireSide) {
         const bb = 0.4 + rng() * 0.3
-        rC = 200 * bb; gC = 100 * bb; bC = 40 * bb
+        rc = 200 * bb; gc = 100 * bb; bc = 40 * bb
       } else {
         const d = 0.2 + rng() * 0.25
-        rC = 70 * d; gC = 35 * d; bC = 15 * d
+        rc = 70 * d; gc = 35 * d; bc = 15 * d
       }
 
       logs.push({
         x, y, z,
         vx: 0, vy: 0, vz: 0,
-        r: rC, g: gC, b: bC,
+        r: rc, g: gc, b: bc,
         a: 0.9 + rng() * 0.1,
         size: 2 + rng() * 4,
         layerId: 'log',
         phase: rng() * Math.PI * 2,
         age: 0, lifespan: 9999,
         startSize: 0, peakSize: 0, endSize: 0,
-        startColor: [rC, gC, bC],
-        endColor: [rC, gC, bC],
+        startColor: [rc, gc, bc],
+        endColor: [rc, gc, bc],
       })
     }
   }
   return logs
+}
+
+// ============================================================
+//  工具：HSV → RGB
+// ============================================================
+function hsvToRgb(h: number, s: number, v: number): [number, number, number] {
+  const i = Math.floor(h * 6)
+  const f = h * 6 - i
+  const p = v * (1 - s)
+  const q = v * (1 - f * s)
+  const t = v * (1 - (1 - f) * s)
+  let r: number, g: number, b: number
+  switch (i % 6) {
+    case 0: r = v; g = t; b = p; break
+    case 1: r = q; g = v; b = p; break
+    case 2: r = p; g = v; b = t; break
+    case 3: r = p; g = q; b = v; break
+    case 4: r = t; g = p; b = v; break
+    default: r = v; g = p; b = q; break
+  }
+  return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)]
+}
+
+// ============================================================
+//  火焰更新函数：每帧调用，处理火焰粒子运动
+//  （替代原来的 Emitter.update）
+// ============================================================
+export function updateFlameParticles(
+  particles: ParticleData[],
+  dt: number,
+  time: number,
+): void {
+  const flameHeight = 3.5
+  const baseRadius = 1.0
+
+  for (const p of particles) {
+    p.age += dt
+
+    // 寿命到，重生
+    if (p.age >= p.lifespan) {
+      p.age -= p.lifespan
+      const t = Math.random()
+      const y = t * flameHeight * 0.3                   // 只在底部 30% 重生
+      const maxR = flameProfile(t * 0.3) * baseRadius
+      const radius = Math.sqrt(Math.random()) * maxR
+      const angle = Math.random() * Math.PI * 2
+      p.x = Math.cos(angle) * radius
+      p.y = y
+      p.z = Math.sin(angle) * radius
+      p.vy = 1.0 + Math.random() * 0.8
+      p.a = 0.55 + Math.random() * 0.35
+      p.lifespan = 1.5 + Math.random() * 1.0
+    }
+
+    const t = p.y / flameHeight
+    const maxR = flameProfile(t) * baseRadius
+
+    // 升起
+    p.y += p.vy * dt
+
+    // 高度超过上限 → 重生
+    if (p.y > flameHeight * 1.1) {
+      p.y = 0
+      const radius = Math.sqrt(Math.random()) * flameProfile(0) * baseRadius * 0.3
+      const angle = Math.random() * Math.PI * 2
+      p.x = Math.cos(angle) * radius
+      p.z = Math.sin(angle) * radius
+      p.vy = 1.0 + Math.random() * 0.8
+      p.lifespan = 1.5 + Math.random() * 1.0
+    }
+
+    // 微小向外扩张
+    if (Math.abs(p.x) > 0.01) p.x *= (1 + 0.01 * dt)
+    if (Math.abs(p.z) > 0.01) p.z *= (1 + 0.01 * dt)
+
+    // Perlin 噪声湍流（空间相关，保证邻近粒子行为一致）
+    const nx = perlin2(p.x * 0.3 + time * 0.4, p.y * 0.2 + p.phase)
+    const nz = perlin2(p.z * 0.3 + time * 0.4, p.y * 0.2 + p.phase + 5)
+    p.x += nx * 0.3 * dt
+    p.z += nz * 0.3 * dt
+
+    // 保持在火焰轮廓内（拉回）
+    const dist = Math.sqrt(p.x * p.x + p.z * p.z)
+    if (dist > maxR * 1.3 && dist > 0.01) {
+      const clamp = maxR * 1.2
+      const scale = clamp / dist
+      p.x *= scale
+      p.z *= scale
+    }
+
+    // Alpha 沿寿命衰减
+    const lifeRatio = p.age / p.lifespan
+    if (lifeRatio < 0.2) p.a = 0.2 + lifeRatio * 3.0 * 0.55
+    else if (lifeRatio < 0.7) p.a = 0.55 + Math.random() * 0.05
+    else p.a = 0.55 * (1 - (lifeRatio - 0.7) / 0.3) * 0.8
+  }
+}
+
+export function updateSparkParticles(
+  particles: ParticleData[],
+  dt: number,
+  time: number,
+): void {
+  for (const p of particles) {
+    p.age += dt
+    if (p.age >= p.lifespan) {
+      p.age -= p.lifespan
+      p.y = 2.5 + Math.random()                    // 火焰顶部重生
+      p.x = (Math.random() - 0.5) * 0.4
+      p.z = (Math.random() - 0.5) * 0.4
+      p.vy = 0.3 + Math.random() * 0.5
+      p.a = 0.7
+    }
+    p.y += p.vy * dt
+    p.x += (Math.random() - 0.5) * 0.1 * dt
+    p.z += (Math.random() - 0.5) * 0.1 * dt
+    p.vy -= 0.05 * dt    // 轻微减速
+
+    const lifeRatio = p.age / p.lifespan
+    if (lifeRatio > 0.5) p.a = 0.7 * (1 - (lifeRatio - 0.5) / 0.5)
+  }
 }

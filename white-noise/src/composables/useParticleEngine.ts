@@ -3,8 +3,13 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { ref, shallowRef } from 'vue'
 import type { ParticleSceneConfig, ParticleData, SpectrumData, TimeEffectState } from '@/types/particle'
 import { generateParticles } from '@/services/particleSampler'
-import { Emitter } from '@/services/particleSystem'
-import { createCampfireEmitters, generateLogs } from '@/scenes/campfire/campfireEmitter'
+import {
+  createCampfireParticles,
+  generateLogs,
+  updateFlameParticles,
+  updateSparkParticles,
+  type CampfireLayers,
+} from '@/scenes/campfire/campfireEmitter'
 
 export function useParticleEngine() {
   const scene = shallowRef<THREE.Scene | null>(null)
@@ -15,8 +20,6 @@ export function useParticleEngine() {
   const running = ref(false)
   const animFrameId = ref(0)
 
-  let emitters: Emitter[] = []
-  let staticLayers: Map<string, ParticleData[]> = new Map()
   let currentConfig: ParticleSceneConfig | null = null
   let currentParticles: Map<string, ParticleData[]> = new Map()
   let currentSpectrum: SpectrumData = { low: 0, mid: 0, high: 0 }
@@ -36,8 +39,8 @@ export function useParticleEngine() {
 
     const aspect = container.clientWidth / container.clientHeight
     const cam = new THREE.PerspectiveCamera(60, aspect, 0.1, 100)
-    cam.position.set(0, 2, 12)
-    cam.lookAt(0, 0, 0)
+    cam.position.set(0, 2, 10)
+    cam.lookAt(0, 0.5, 0)
     camera.value = cam
 
     const r = new THREE.WebGLRenderer({
@@ -70,20 +73,12 @@ export function useParticleEngine() {
     if (!s) return
 
     if (config.id === 'campfire') {
-      // Create all emitters
-      emitters = createCampfireEmitters(isMobile)
-      // Merge particles by layerId (multiple emitters can share same layerId)
-      currentParticles = new Map()
-      for (const em of emitters) {
-        const map = em.getLayerMap()
-        for (const [k, v] of map) {
-          const existing = currentParticles.get(k)
-          if (existing) existing.push(...v)
-          else currentParticles.set(k, v)
-        }
-      }
+      // New surface-particle system
+      const layers = createCampfireParticles(isMobile)
       const logs = generateLogs(isMobile)
-      staticLayers.set('log', logs)
+      currentParticles = new Map()
+      currentParticles.set('flame', layers.flame)
+      currentParticles.set('spark', layers.spark)
       currentParticles.set('log', logs)
     } else {
       const particles = generateParticles(config, isMobile)
@@ -119,7 +114,7 @@ export function useParticleEngine() {
       float dist = length(center);
       if (dist > 0.5) discard;
       float falloff = 1.0 - smoothstep(0.0, 0.5, dist);
-      falloff = falloff * falloff * (2.0 - falloff);
+      falloff = falloff * falloff;
       gl_FragColor = vec4(vColor, falloff * vAlpha);
     }
   `
@@ -176,11 +171,16 @@ export function useParticleEngine() {
   function updateParticles(time: number, delta: number, spectrum?: SpectrumData) {
     if (!currentConfig) return
     if (spectrum) currentSpectrum = spectrum
-    if (emitters.length > 0) {
-      for (const em of emitters) {
-        em.update(delta, time, currentSpectrum.low, currentSpectrum.mid, currentSpectrum.high)
-      }
+
+    // 篝火：专用更新函数（火焰曲面粒子）
+    if (currentConfig.id === 'campfire') {
+      const flameData = currentParticles.get('flame')
+      const sparkData = currentParticles.get('spark')
+      if (flameData) updateFlameParticles(flameData, delta, time)
+      if (sparkData) updateSparkParticles(sparkData, delta, time)
     }
+
+    // 写入 Three.js Buffer
     for (const [layerId, data] of currentParticles) {
       const points = pointsMeshes.value.get(layerId)
       if (!points) continue
@@ -228,7 +228,6 @@ export function useParticleEngine() {
   function dispose() {
     stop()
     controls.value?.dispose(); controls.value = null
-    for (const em of emitters) em.dispose(); emitters = []
     const s = scene.value
     if (s) {
       while (s.children.length > 0) {
@@ -238,7 +237,7 @@ export function useParticleEngine() {
       }
     }
     pointsMeshes.value.clear(); positionBuffers.clear(); colorBuffers.clear(); sizeBuffers.clear()
-    currentParticles.clear(); staticLayers.clear(); currentConfig = null; clock = new THREE.Clock()
+    currentParticles.clear(); currentConfig = null; clock = new THREE.Clock()
   }
 
   function resize(w: number, h: number) {
