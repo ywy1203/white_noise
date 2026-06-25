@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Audio Test</title>
+<style>body{background:#111;color:#fff;font-family:sans-serif;padding:40px;text-align:center}
+button{font-size:20px;padding:12px 30px;border-radius:12px;background:#333;border:none;color:#fff;cursor:pointer;margin:10px}
+pre{background:#222;padding:12px;border-radius:8px;text-align:left;margin:20px auto;max-width:400px;font-size:13px}</style>
+</head>
+<body>
+<h2>🔊 Audio Test</h2>
+<button onclick="test1()">Test 1: new Audio()</button>
+<button onclick="test2()">Test 2: AudioContext</button>
+<pre id="log">Click a button</pre>
+
+<script>
+const log = document.getElementById('log');
+function add(m) { log.textContent = new Date().toLocaleTimeString() + ' ' + m + '\n' + log.textContent; }
+
+function test1() {
+  add('Test1: new Audio()...');
+  try {
+    const a = new Audio('/sounds/nature/campfire.mp3');
+    a.loop = true;
+    a.volume = 0.5;
+    a.play().then(() => add('Test1: ✅ playing')).catch(e => add('Test1: ❌ ' + e.message));
+  } catch(e) { add('Test1: ❌ err ' + e.message); }
+}
+
+function test2() {
+  add('Test2: AudioContext...');
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    add('Test2: ctx state=' + ctx.state);
+    if (ctx.state === 'suspended') {
+      ctx.resume().then(() => add('Test2: resumed'));
+    }
+    fetch('/sounds/nature/campfire.mp3').then(r => {
+      add('Test2: fetch status=' + r.status + ' type=' + r.headers.get('Content-Type'));
+      return r.arrayBuffer();
+    }).then(buf => {
+      add('Test2: got ' + buf.byteLength + ' bytes');
+      return ctx.decodeAudioData(buf);
+    }).then(ab => {
+      add('Test2: decoded ' + ab.duration.toFixed(1) + 's');
+      const src = ctx.createBufferSource();
+      src.buffer = ab;
+      src.loop = true;
+      const g = ctx.createGain();
+      g.gain.value = 0.3;
+      src.connect(g).connect(ctx.destination);
+      src.start(0);
+      add('Test2: ✅ playing');
+    }).catch(e => add('Test2: ❌ ' + (e.message || e)));
+  } catch(e) { add('Test2: ❌ err ' + e.message); }
+}
+</script>
+</body>
+</html>

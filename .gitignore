@@ -1,0 +1,13 @@
+node_modules/
+.cache/
+.DS_Store
+*.log
+.env
+.git/
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.env
+.deep-copilot/

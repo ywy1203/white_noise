@@ -1,0 +1,19 @@
+{
+  "name": "study-companion",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "sync": "npx cap sync",
+    "open:ios": "npx cap open ios",
+    "build:ios": "npx cap sync ios && npx cap open ios",
+    "android": "npx cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.3.0",
+    "@capacitor/cli": "^7.3.0",
+    "@capacitor/core": "^7.3.0"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  }
+}

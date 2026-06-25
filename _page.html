@@ -1,0 +1,1033 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#000000">
+<link rel="manifest" href="manifest.json">
+<title>陪伴学习 · 白噪音</title>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#000;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#fff;user-select:none;-webkit-user-select:none;overscroll-behavior:none}
+body{background:radial-gradient(ellipse at center,#1a0a00 0%,#000 100%)}
+
+/* ── Canvas ── */
+.scene-canvas{position:fixed;inset:0;opacity:0;transition:opacity .5s ease;pointer-events:none;z-index:0}
+.scene-canvas.active{opacity:1;z-index:1}
+.scene-canvas.prev-active{opacity:1;z-index:2}
+.scene-canvas canvas{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover}
+.scene-canvas::after{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at center, rgba(0,0,0,.15) 0%, rgba(0,0,0,.4) 100%);pointer-events:none;z-index:1}
+.scene-canvas.loading::after{content:'加载中...';display:flex;align-items:center;justify-content:center;font-size:14px;color:rgba(255,255,255,.4);z-index:2;background:rgba(0,0,0,.5)}
+/* dim overlay */
+.dim-overlay{position:fixed;inset:0;z-index:1;background:#000;opacity:0;pointer-events:none;transition:opacity .4s}
+.dim-overlay.on{opacity:.3}
+/* focus clock — frosted glass card */
+.focus-card{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(.96);z-index:2;padding:48px 72px;border-radius:28px;background:rgba(0,0,0,.12);backdrop-filter:blur(40px) saturate(1.1);-webkit-backdrop-filter:blur(40px) saturate(1.1);border:1px solid rgba(255,255,255,.06);box-shadow:0 4px 24px rgba(0,0,0,.2),inset 0 1px 0 rgba(255,255,255,.04);opacity:0;pointer-events:auto;cursor:pointer;transition:opacity .5s cubic-bezier(.4,0,.2,1),transform .5s cubic-bezier(.4,0,.2,1)}
+.focus-card.on{opacity:1;transform:translate(-50%,-50%) scale(1)}
+.focus-card .focus-time{font-size:min(20vw,112px);font-weight:100;letter-spacing:12px;font-variant-numeric:tabular-nums;color:rgba(255,255,255,.9);text-shadow:0 0 120px rgba(255,255,255,.06);line-height:1}
+/* style B — floating */
+.focus-card.style-b{background:transparent;backdrop-filter:none;-webkit-backdrop-filter:none;border:none;box-shadow:none;padding:0}
+.focus-card.style-b .focus-time{font-size:min(24vw,160px);font-weight:200;letter-spacing:18px;color:rgba(255,255,255,.95);text-shadow:0 0 200px rgba(255,255,255,.1),0 0 60px rgba(0,0,0,.5)}
+
+/* ── Idle layer (always visible) ── */
+.idle-layer{position:fixed;inset:0;z-index:2;pointer-events:none}
+.idle-time{position:fixed;top:20px;right:20px;font-size:16px;font-weight:500;opacity:.85;text-shadow:0 0 8px rgba(0,0,0,.7),0 2px 4px rgba(0,0,0,.6);z-index:3}
+.idle-timer{position:fixed;top:44px;right:20px;font-size:13px;font-weight:500;opacity:0;text-shadow:0 0 8px rgba(0,0,0,.7),0 2px 4px rgba(0,0,0,.6);z-index:3;transition:opacity .3s}
+.idle-timer.active{opacity:.7}
+.idle-scene{position:fixed;bottom:24px;left:20px;font-size:14px;opacity:.75;text-shadow:0 0 8px rgba(0,0,0,.7),0 2px 4px rgba(0,0,0,.6);z-index:3}
+.idle-dot{position:fixed;bottom:24px;right:20px;width:10px;height:10px;border-radius:50%;background:rgba(74,222,128,.7);box-shadow:0 0 8px rgba(74,222,128,.4);z-index:3}
+
+/* ── Tap layer (triggers controls) ── */
+.tap-layer{position:fixed;inset:0;z-index:4;cursor:pointer}
+
+/* ── Control layer (hidden by default) ── */
+.ctrl-layer{position:fixed;inset:0;z-index:10;pointer-events:none;opacity:0;transition:opacity .35s ease}
+.ctrl-layer.visible{opacity:1;pointer-events:auto}
+
+/* Close + Time */
+.ctrl-close{position:fixed;top:16px;left:16px;width:40px;height:40px;border-radius:50%;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06);color:#fff;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);transition:transform .15s,background .15s}
+.ctrl-close:active{transform:scale(.92);background:rgba(255,255,255,.12)}
+.ctrl-clock{position:fixed;top:16px;right:16px;padding:8px 14px;border-radius:20px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);font-size:14px;font-weight:500;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);cursor:pointer}
+
+/* Scene arrows */
+.ctrl-arrow{position:fixed;top:50%;transform:translateY(-50%);width:44px;height:44px;border-radius:50%;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06);color:#fff;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);transition:transform .15s,background .15s}
+.ctrl-arrow:active{transform:translateY(-50%) scale(.9);background:rgba(255,255,255,.14)}
+.ctrl-arrow.left{left:12px}
+.ctrl-arrow.right{right:12px}
+
+/* Bottom control bar */
+.ctrl-bar{position:fixed;bottom:16px;left:16px;right:16px;height:56px;border-radius:18px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.06);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);display:flex;align-items:center;padding:0 12px;gap:6px;overflow-x:auto}
+.ctrl-bar::-webkit-scrollbar{display:none}
+.ctrl-scene-icon{flex-shrink:0;width:44px;height:44px;border-radius:12px;background:rgba(255,255,255,.03);border:none;color:rgba(255,255,255,.5);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s}
+.ctrl-scene-icon.active{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);color:#fff;box-shadow:0 0 12px rgba(255,255,255,.1)}
+.ctrl-spacer{flex:1;min-width:8px}
+.ctrl-btn{flex-shrink:0;width:40px;height:40px;border-radius:50%;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.04);color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:transform .15s,background .15s}
+.ctrl-btn:active{transform:scale(.9);background:rgba(255,255,255,.12)}
+.ctrl-btn.timer-btn{width:auto;padding:0 12px;font-size:13px;font-variant-numeric:tabular-nums;font-weight:500;gap:4px}
+.ctrl-btn.heart-btn.active{color:#ec4899;border-color:rgba(236,72,153,.3);background:rgba(236,72,153,.1);box-shadow:0 0 8px rgba(236,72,153,.2)}
+
+/* ── Panels (bottom sheets) ── */
+.panel-overlay{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.4);opacity:0;pointer-events:none;transition:opacity .3s}
+.panel-overlay.open{opacity:1;pointer-events:auto}
+.panel-sheet{position:fixed;bottom:0;left:0;right:0;z-index:31;max-height:60vh;background:rgba(18,18,22,.92);border-radius:24px 24px 0 0;border:1px solid rgba(255,255,255,.04);backdrop-filter:blur(30px);-webkit-backdrop-filter:blur(30px);display:flex;flex-direction:column;transform:translateY(100%);transition:transform .4s cubic-bezier(.32,.72,0,1);overflow:hidden}
+.panel-overlay.open+.panel-sheet,.panel-sheet.open{transform:translateY(0)}
+
+.panel-grip{width:32px;height:4px;border-radius:2px;background:rgba(255,255,255,.15);margin:10px auto 8px;flex-shrink:0}
+.panel-hd{display:flex;align-items:center;justify-content:space-between;padding:4px 20px 12px;flex-shrink:0}
+.panel-hd h3{font-size:16px;font-weight:600}
+.panel-hd button{width:32px;height:32px;border-radius:50%;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:15px;cursor:pointer}
+.panel-body{flex:1;overflow-y:auto;min-height:0;padding:0 20px 20px}
+.panel-body::-webkit-scrollbar{width:3px}
+.panel-body::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:4px}
+
+/* Sound panel tabs */
+.panel-tabs{display:flex;gap:4px;padding:4px;background:rgba(255,255,255,.04);border-radius:12px;margin-bottom:16px}
+.panel-tab{flex:1;padding:8px;text-align:center;font-size:13px;border-radius:10px;cursor:pointer;transition:all .2s;border:none;background:none;color:rgba(255,255,255,.5)}
+.panel-tab.active{background:rgba(255,255,255,.1);color:#fff;font-weight:500}
+
+/* Sound cards */
+.sound-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px}
+.sound-card{border-radius:14px;padding:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.04);cursor:pointer;transition:all .2s}
+.sound-card.on{background:rgba(74,222,128,.08);border-color:rgba(74,222,128,.2)}
+.sound-card:active{transform:scale(.97)}
+.sound-card .s-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.sound-card .s-icon{font-size:20px}
+.sound-card .s-label{font-size:13px;font-weight:500}
+.sound-card input[type=range]{width:100%;margin-top:6px;accent-color:#4ade80;height:6px;opacity:.35}
+.sound-card.on input[type=range]{opacity:1}
+.sound-card .s-vol{font-size:11px;opacity:.4;font-variant-numeric:tabular-nums;min-width:32px;text-align:right}
+.sound-card.on .s-vol{opacity:.7}
+
+/* Music search */
+.music-search-box{width:100%;height:40px;border-radius:20px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;padding:0 16px;font-size:14px;outline:none;margin-bottom:12px}
+.music-search-box::placeholder{color:rgba(255,255,255,.3)}
+.music-row{display:flex;align-items:center;gap:12px;padding:10px;border-radius:12px;cursor:pointer;transition:background .15s}
+.music-row:hover{background:rgba(255,255,255,.04)}
+.music-row.playing{background:rgba(74,222,128,.06)}
+.music-row .mu-icon{width:36px;height:36px;border-radius:8px;background:rgba(255,255,255,.08);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:16px}
+.music-row .mu-info{flex:1;min-width:0}
+.music-row .mu-name{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.music-row .mu-art{font-size:11px;opacity:.45;margin-top:2px}
+.music-empty{padding:40px 20px;text-align:center;opacity:.35;font-size:13px}
+
+/* Mini player */
+.mini-player{display:flex;align-items:center;gap:12px;padding:10px 14px;margin-top:12px;border-radius:14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.06)}
+.mini-player .mu-cover{width:36px;height:36px;border-radius:8px;background:rgba(255,255,255,.1);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:16px}
+.mini-player .mu-info{flex:1;min-width:0}
+.mini-player .mu-name{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mini-player .mu-art{font-size:10px;opacity:.4}
+.mini-player button{width:32px;height:32px;border-radius:50%;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px;cursor:pointer;flex-shrink:0}
+.mini-player .mu-vol{width:60px;accent-color:#4ade80}
+
+/* Timer panel */
+.timer-modes{display:flex;gap:4px;padding:4px;background:rgba(255,255,255,.04);border-radius:12px;margin-bottom:20px}
+.timer-mode{flex:1;padding:8px 6px;text-align:center;font-size:12px;border-radius:10px;cursor:pointer;border:none;background:none;color:rgba(255,255,255,.45);transition:all .2s}
+.timer-mode.active{background:rgba(255,255,255,.1);color:#fff}
+.timer-display{text-align:center;padding:24px 0;font-size:56px;font-weight:200;font-variant-numeric:tabular-nums;letter-spacing:2px}
+.timer-label{text-align:center;font-size:13px;opacity:.5;margin-bottom:16px}
+.timer-actions{display:flex;gap:10px;justify-content:center}
+.timer-actions button{padding:10px 28px;border-radius:24px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.06);color:#fff;font-size:14px;cursor:pointer;transition:all .2s}
+.timer-actions button:active{transform:scale(.95)}
+.timer-actions button.primary{background:#4ade80;border-color:#4ade80;color:#000}
+.timer-actions button.primary:disabled{background:rgba(74,222,128,.15);border-color:rgba(74,222,128,.1);color:rgba(74,222,128,.3);cursor:default}
+.timer-set{display:flex;gap:8px;justify-content:center;align-items:center;margin-top:12px}
+.timer-set input{width:50px;padding:8px;text-align:center;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:16px;outline:none}
+.timer-set span{font-size:20px;opacity:.4}
+
+/* Favorites */
+.fav-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.fav-card{padding:16px;border-radius:16px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.04);cursor:pointer;transition:all .2s}
+.fav-card:active{transform:scale(.97)}
+.fav-card .fav-icon{font-size:28px;margin-bottom:6px}
+.fav-card .fav-name{font-size:14px;font-weight:500}
+.fav-card .fav-desc{font-size:11px;opacity:.4;margin-top:2px}
+
+/* Login overlay */
+.login-overlay{position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.8);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .3s}
+.login-overlay.open{opacity:1;pointer-events:auto}
+.login-card{background:#1a1a20;border-radius:20px;padding:28px 24px;text-align:center;max-width:320px;width:90%;position:relative}
+.login-card h3{font-size:18px;margin-bottom:6px}
+.login-card p{font-size:13px;opacity:.5;margin-bottom:16px}
+.login-card .qr-wrap{width:200px;height:200px;border-radius:12px;margin:0 auto 14px;background:rgba(255,255,255,.05);overflow:hidden}
+.login-card .qr-wrap img{width:100%;height:100%}
+.login-card .qr-text{font-size:12px;opacity:.6;min-height:18px}
+.login-card input[type=text],.login-card input[type=password]{width:100%;padding:10px 14px;margin:6px 0;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:14px;outline:none}
+.login-card .btn-primary{width:100%;padding:10px;margin-top:8px;border-radius:10px;border:none;background:#ec4141;color:#fff;font-size:14px;cursor:pointer}
+.login-card .btn-switch{font-size:12px;opacity:.5;margin-top:12px;cursor:pointer;background:none;border:none;color:inherit}
+.login-card .btn-close{position:absolute;top:12px;right:12px;width:32px;height:32px;border-radius:50%;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;font-size:16px;cursor:pointer}
+
+</head>
+<body>
+
+<!-- Videos rendered in JS -->
+<div class="scene-canvas" id="cv0"><canvas id="c0"></canvas></div>
+<div class="scene-canvas" id="cv1"><canvas id="c1"></canvas></div>
+<div class="scene-canvas" id="cv2"><canvas id="c2"></canvas></div>
+<div class="scene-canvas" id="cv3"><canvas id="c3"></canvas></div>
+<div class="scene-canvas" id="cv4"><canvas id="c4"></canvas></div>
+<div class="scene-canvas" id="cv5"><canvas id="c5"></canvas></div>
+<div class="scene-canvas" id="cv6"><canvas id="c6"></canvas></div>
+
+<!-- Idle layer (always visible) -->
+<div class="dim-overlay" id="dimOverlay"></div>
+<div class="focus-card" id="focusCard" onclick="if(focusMode)toggleFocus()">
+  <div class="focus-time" id="focusTime">14:32</div>
+</div>
+<div class="idle-time" id="idleTime">14:32</div>
+<div class="idle-timer" id="idleTimer"></div>
+<div class="idle-scene" id="idleScene">🔥 壁炉 · 冬夜</div>
+<div class="idle-dot" id="idleDot"></div>
+
+<!-- Tap target -->
+<div class="tap-layer" id="tapLayer"></div>
+
+<!-- Control layer -->
+<div class="ctrl-layer" id="ctrlLayer">
+  <button class="ctrl-close" id="ctrlClose">✕</button>
+  <button class="ctrl-clock" id="ctrlClock">14:32</button>
+  <button class="ctrl-arrow left" id="ctrlLeft">◀</button>
+  <button class="ctrl-arrow right" id="ctrlRight">▶</button>
+
+  <div class="ctrl-bar" id="ctrlBar">
+    <button class="ctrl-scene-icon active" data-scene="0">🔥</button>
+    <button class="ctrl-scene-icon" data-scene="1">🏞️</button>
+    <button class="ctrl-scene-icon" data-scene="2">🌊</button>
+    <button class="ctrl-scene-icon" data-scene="3">🌅</button>
+    <button class="ctrl-scene-icon" data-scene="4">❄️</button>
+    <button class="ctrl-scene-icon" data-scene="5">☕</button>
+    <button class="ctrl-scene-icon" data-scene="6">☔</button>
+    <div class="ctrl-spacer"></div>
+    <button class="ctrl-btn" id="ctrlMute" title="静音">🔊</button>
+    <button class="ctrl-btn" id="ctrlDim" title="降低亮度">🌓</button>
+    <button class="ctrl-btn" id="ctrlFocus" title="专注模式" style="opacity:.5">◎</button>
+    <button class="ctrl-btn timer-btn" id="ctrlTimerBtn">⏱️ <span id="ctrlTimerTxt">00:00</span></button>
+    <button class="ctrl-btn heart-btn" id="ctrlHeart">❤️</button>
+    <button class="ctrl-btn" id="ctrlSettings" title="声音面板">🎵</button>
+  </div>
+</div>
+
+<!-- Sound panel (bottom sheet) -->
+<div class="panel-overlay" id="soundOverlay"></div>
+<div class="panel-sheet" id="soundPanel">
+  <div class="panel-grip"></div>
+  <div class="panel-hd"><h3>🎵 声音控制</h3><button id="soundClose">✕</button></div>
+  <div class="panel-body">
+    <div class="panel-tabs" id="soundTabs">
+      <button class="panel-tab active" data-tab="noise">白噪音</button>
+      <button class="panel-tab" data-tab="music">🎵 网易云</button>
+      <button class="panel-tab" data-tab="fav">❤️ 收藏</button>
+    </div>
+    <!-- Tab: white noise -->
+    <div id="tabNoise"></div>
+    <!-- Tab: NetEase music -->
+    <div id="tabMusic" style="display:none">
+      <button class="ctrl-btn" id="musicLoginBtn" style="width:auto;padding:6px 14px;font-size:12px;margin-bottom:8px;border-radius:14px">🔓 登录网易云</button>
+      <input class="music-search-box" id="musicSearch" placeholder="搜索歌曲..." autocomplete="off">
+      <div id="musicResults"><div class="music-empty">输入关键词搜索</div></div>
+      <div class="mini-player" id="miniPlayer" style="display:none">
+        <div class="mu-cover">🎵</div>
+        <div class="mu-info"><div class="mu-name" id="nowPlaying">-</div><div class="mu-art" id="nowArtist">-</div></div>
+        <button id="miniPlayBtn">▶</button>
+        <input type="range" class="mu-vol" id="miniVol" min="0" max="100" value="70">
+      </div>
+    </div>
+    <!-- Tab: favorites -->
+    <div id="tabFav" style="display:none"><div class="fav-grid" id="favGrid"></div></div>
+  </div>
+</div>
+
+<!-- Timer panel (bottom sheet) -->
+<div class="panel-overlay" id="timerOverlay"></div>
+<div class="panel-sheet" id="timerPanel">
+  <div class="panel-grip"></div>
+  <div class="panel-hd"><h3>⏱️ 计时</h3><button id="timerClose">✕</button></div>
+  <div class="panel-body">
+    <div class="timer-modes" id="timerModes">
+      <button class="timer-mode active" data-mode="clock">🕐 时钟</button>
+      <button class="timer-mode" data-mode="stopwatch">▶ 正计时</button>
+      <button class="timer-mode" data-mode="countdown">⏳ 倒计时</button>
+      <button class="timer-mode" data-mode="pomodoro">🍅 番茄</button>
+    </div>
+    <div class="timer-display" id="timerDisplay">14:32:00</div>
+    <div class="timer-label" id="timerLabel">当前时间</div>
+    <div class="timer-actions" id="timerActions">
+      <button class="primary" id="timerMainBtn">▶ 开始</button>
+      <button id="timerResetBtn">↺ 重置</button>
+    </div>
+    <div class="timer-set" id="timerSet" style="display:none">
+      <input type="number" id="tsMin" value="25" min="1" max="120"> <span>:</span>
+      <input type="number" id="tsSec" value="0" min="0" max="59">
+    </div>
+    <div id="timerStats" style="text-align:center;font-size:12px;opacity:.4;margin-top:12px"></div>
+  </div>
+</div>
+
+<!-- Login overlay -->
+<div class="login-overlay" id="loginOverlay">
+  <div class="login-card">
+    <button class="btn-close" id="loginClose">✕</button>
+    <h3 id="loginTitle">📱 扫码登录</h3>
+    <p id="loginHint">打开网易云音乐 App 扫描二维码</p>
+    <div class="qr-wrap" id="qrWrap"><img id="qrImg" src="" alt=""></div>
+    <div class="qr-text" id="qrText">获取中...</div>
+    <div id="phoneFields" style="display:none">
+      <input type="text" id="phoneInput" placeholder="手机号">
+      <input type="password" id="pwInput" placeholder="密码">
+      <button class="btn-primary" id="phoneSubmit">登录</button>
+      <div id="phoneMsg" style="font-size:12px;margin-top:6px;opacity:.6"></div>
+    </div>
+    <button class="btn-switch" id="switchLogin">📱 使用手机号登录</button>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════
+// Helpers
+// ═══════════════════════════════════════════
+const $ = id => document.getElementById(id);
+const SCENES = [
+  { id:'fireplace', icon:'🔥', name:'壁炉 · 冬夜', video:'videos/fireplace.mp4', tone:'#ff8c42' },
+  { id:'rain', icon:'🏞️', name:'山涧溪流', video:'videos/rain.mp4', tone:'#7eb8a0' },
+  { id:'forest', icon:'🌊', name:'海浪拍礁', video:'videos/forest.mp4', tone:'#4a90b8' },
+  { id:'ocean', icon:'🌅', name:'平静海面', video:'videos/ocean.mp4', tone:'#6baed6' },
+  { id:'snow', icon:'❄️', name:'踩雪', video:'videos/snow.mp4', tone:'#d4e4f0' },
+  { id:'cafe', icon:'☕', name:'手冲咖啡', video:'videos/cafe.mp4', tone:'#b8956a' },
+  { id:'cafe_rain', icon:'☔', name:'咖啡雨景', video:'videos/cafe_rain.mp4', tone:'#8ba8b0' },
+];
+const SCENE_COUNT = SCENES.length;
+
+// ═══════════════════ Video canvases ═══════════════════
+const videos = [];
+const canvases = [];
+const ctxs = [];
+
+function createVideoCanvases() {
+  for (let i = 0; i < SCENE_COUNT; i++) {
+    const v = document.createElement('video');
+    v.crossOrigin = 'anonymous';
+    v.loop = true;
+    v.muted = true;
+    v.playsInline = true;
+    v.preload = 'none';
+    // Append to DOM so browser actually loads it
+    $('cv' + i).prepend(v);
+    videos.push(v);
+
+    const cv = $('cv' + i);
+    cv.classList.add('loading');
+    const c = cv.querySelector('canvas');
+    canvases.push(c);
+    ctxs.push(c.getContext('2d'));
+  }
+}
+
+function resizeCanvases() {
+  // Cap at 1080p effective to keep drawImage fast
+  const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+  const W = Math.round(Math.min(window.innerWidth * dpr, 1920));
+  const H = Math.round(Math.min(window.innerHeight * dpr, 1080));
+  canvases.forEach(c => { c.width = W; c.height = H; });
+}
+
+function drawFrame() {
+  for (let i = 0; i < SCENE_COUNT; i++) {
+    if (!$('cv' + i).classList.contains('active')) continue;
+    const v = videos[i];
+    if (v.readyState >= 2) {
+      const c = canvases[i], ctx = ctxs[i];
+      const vw = v.videoWidth, vh = v.videoHeight;
+      if (!vw) continue;
+      const scale = Math.max(c.width / vw, c.height / vh);
+      const dw = vw * scale, dh = vh * scale;
+      const dx = (c.width - dw) / 2, dy = (c.height - dh) / 2;
+      ctx.drawImage(v, dx, dy, dw, dh);
+      $('cv' + i).classList.remove('loading');
+    }
+  }
+  // 30 fps is smooth enough for ambient video and half the CPU
+  setTimeout(() => requestAnimationFrame(drawFrame), 16);
+}
+
+// ═══════════════════ Audio system ═══════════════════
+const MUSIC_PROXY = 'http://localhost:8787';
+let isMuted = false;
+let dimLevel = 0; // 0=off, 1=30%, 2=60%
+let focusMode = 0; // 0=off, 1=card, 2=float
+function toggleFocus() {
+  focusMode = (focusMode + 1) % 3;
+  const card = $('focusCard');
+  card.classList.toggle('on', focusMode >= 1);
+  card.classList.toggle('style-b', focusMode === 2);
+  $('ctrlFocus').style.opacity = focusMode ? '1' : '.5';
+  $('ctrlFocus').textContent = ['◎','◉','○'][focusMode];
+  if (focusMode) { updateFocusClock(); hideCtrl(); }
+  try { localStorage.setItem('focusMode', focusMode); } catch (_) {}
+}
+function updateFocusClock() {
+  const now = new Date();
+  $('focusTime').textContent = now.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}
+function applyDim() {
+  $('dimOverlay').classList.toggle('on', dimLevel >= 1);
+  $('dimOverlay').style.opacity = dimLevel === 0 ? '0' : dimLevel === 1 ? '.3' : '.6';
+  $('ctrlDim').style.opacity = dimLevel > 0 ? '1' : '.5';
+  try { localStorage.setItem('dimLevel', dimLevel); } catch (_) {}
+}
+
+const CATS = [
+  { id:'preset', name:'⭐ 当前场景音效' },
+  { id:'rain', name:'🌧️ 雨声', sounds:['light-rain','heavy-rain','rain-on-window','rain-on-leaves','rain-on-tent','rain-on-umbrella','rain-on-car-roof','thunder'] },
+  { id:'nature', name:'🌿 自然', sounds:['campfire','wind','howling-wind','wind-in-trees','river','waterfall','waves','walk-on-leaves','walk-on-snow','walk-on-gravel','droplets','jungle'] },
+  { id:'animals', name:'🐾 动物', sounds:'birds seagulls crickets wolf owl frog cat-purring whale beehive chickens cows crows dog-barking horse-gallop sheep woodpecker'.split(' ') },
+  { id:'urban', name:'🏙️ 城市', sounds:['busy-street','road','traffic','highway','crowd','fireworks','ambulance-siren'] },
+  { id:'places', name:'🏛️ 场所', sounds:['cafe','library','office','restaurant','church','supermarket','subway-station','construction-site','airport','crowded-bar','laboratory','laundry-room','night-village','temple','underwater','carousel'] },
+  { id:'transport', name:'🚗 交通', sounds:['train','inside-a-train','airplane','sailboat','rowing-boat','submarine'] },
+  { id:'things', name:'🔧 物品', sounds:'clock typewriter keyboard washing-machine ceiling-fan dryer boiling-water bubbles paper vinyl-effect wind-chimes slide-projector tuning-radio morse-code windshield-wipers singing-bowl'.split(' ') },
+  { id:'noise', name:'📡 噪声', sounds:['white-noise','pink-noise','brown-noise'] },
+  { id:'binaural', name:'🧠 双耳节拍', sounds:['binaural-alpha','binaural-beta','binaural-delta','binaural-gamma','binaural-theta'] },
+];
+const ICONS = {
+  'light-rain':'🌦️','heavy-rain':'🌧️','rain-on-window':'🪟','rain-on-leaves':'🍃','rain-on-tent':'⛺','rain-on-umbrella':'☂️','rain-on-car-roof':'🚗','thunder':'⛈️',
+  'campfire':'🔥','wind':'💨','howling-wind':'💨','wind-in-trees':'🌲','river':'💧','waterfall':'🏞️','waves':'🌊','walk-on-leaves':'🍂','walk-on-snow':'❄️','walk-on-gravel':'🪨','droplets':'💧','jungle':'🌴',
+  'birds':'🐦','seagulls':'🕊️','crickets':'🦗','wolf':'🐺','owl':'🦉','frog':'🐸','cat-purring':'😺','whale':'🐋','beehive':'🐝','chickens':'🐔','cows':'🐄','crows':'🐦‍⬛','dog-barking':'🐕','horse-gallop':'🐎','sheep':'🐑','woodpecker':'🪶',
+  'busy-street':'🚦','road':'🛣️','traffic':'🚗','highway':'🛣️','crowd':'👥','fireworks':'🎆','ambulance-siren':'🚑',
+  'cafe':'☕','library':'📚','office':'💼','restaurant':'🍽️','church':'⛪','supermarket':'🏪','subway-station':'🚇','construction-site':'🏗️','airport':'✈️','crowded-bar':'🍻','laboratory':'🧪','laundry-room':'🫧','night-village':'🌙','temple':'🛕','underwater':'🤿','carousel':'🎠',
+  'train':'🚆','inside-a-train':'🚆','airplane':'✈️','sailboat':'⛵','rowing-boat':'🚣','submarine':'🔬',
+  'clock':'🕐','typewriter':'📠','keyboard':'⌨️','washing-machine':'🫧','ceiling-fan':'🌀','dryer':'💨','boiling-water':'🫧','bubbles':'🫧','paper':'📄','vinyl-effect':'💿','wind-chimes':'🎐','slide-projector':'📽️','tuning-radio':'📻','morse-code':'📟','windshield-wipers':'🚗','singing-bowl':'🪷',
+  'white-noise':'📡','pink-noise':'📡','brown-noise':'📡',
+  'binaural-alpha':'🧠','binaural-beta':'🧠','binaural-delta':'🧠','binaural-gamma':'🧠','binaural-theta':'🧠',
+};
+const SMAP = {};
+CATS.forEach(c => { if (!c.sounds) return; c.sounds.forEach(s => { SMAP[s] = { cat: c.id, ext: (c.id === 'noise' || c.id === 'binaural') ? '.wav' : '.mp3', label: s.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase()), icon: ICONS[s] || '🔊' }; }); });
+
+const PRESET_IDS = [
+  ['campfire','wind','clock','cat-purring','rain-on-window','cafe','typewriter','brown-noise'],
+  ['river','birds','wind-in-trees','walk-on-leaves','waterfall','campfire','brown-noise','droplets'],
+  ['waves','underwater','wind','seagulls','sailboat','wind-in-trees','white-noise','river'],
+  ['underwater','wind-in-trees','seagulls','sailboat','waves','white-noise','pink-noise','wind'],
+  ['wind','wind-in-trees','brown-noise','campfire','white-noise','walk-on-leaves','river','owl'],
+  ['campfire','river','cafe','clock','typewriter','white-noise','wind-in-trees'],
+  ['rain-on-window','cafe','typewriter','white-noise'],
+];
+const PRESET_VOL = [
+  { campfire: .7, wind: .2, clock: .3, 'cat-purring': .35, 'rain-on-window': .25, cafe: .15, typewriter: .25, 'brown-noise': .1 },
+  { river: .6, birds: .35, 'wind-in-trees': .2, 'walk-on-leaves': .15, waterfall: .45, campfire: .15, 'brown-noise': .08, droplets: .15 },
+  { waves: .65, underwater: .3, wind: .25, seagulls: .2, sailboat: .08, 'wind-in-trees': .15, 'white-noise': .08, river: .2 },
+  { underwater: .45, 'wind-in-trees': .3, seagulls: .25, sailboat: .08, waves: .25, 'white-noise': .1, 'pink-noise': .1, wind: .15 },
+  { wind: .35, 'wind-in-trees': .3, 'brown-noise': .12, campfire: .15, 'white-noise': .08, 'walk-on-leaves': .25, river: .08, owl: .25 },
+  { campfire: .35, river: .5, cafe: .35, clock: .25, typewriter: .25, 'white-noise': .08, 'wind-in-trees': .1 },
+  { 'rain-on-window': .5, cafe: .4, typewriter: .2, 'white-noise': .05 },
+];
+
+let sceneIndex = 0;
+let mixes = Array.from({ length: SCENE_COUNT }, () => ({}));
+const audios = {};
+
+function spath(id) { const m = SMAP[id]; if (!m) return ''; return 'sounds/' + (m.cat ? m.cat + '/' : '') + id + m.ext; }
+function playSnd(id, vol) {
+  if (audios[id]) { audios[id].volume = vol * (isMuted ? 0 : 1); return; }
+  const p = spath(id); if (!p) return;
+  const a = new Audio(p); a.loop = true; a.volume = vol * (isMuted ? 0 : 1); a.play().catch(() => {}); audios[id] = a;
+}
+function stopSnd(id) { if (audios[id]) { audios[id].pause(); audios[id].src = ''; delete audios[id]; } }
+function setVol(id, vol) { if (audios[id]) audios[id].volume = vol * (isMuted ? 0 : 1); }
+function applyMix() {
+  const mix = mixes[sceneIndex] || {};
+  Object.keys(audios).forEach(id => { if (!mix[id] || !mix[id].active) stopSnd(id); });
+  Object.keys(mix).forEach(id => { if (mix[id].active) playSnd(id, mix[id].vol); });
+}
+function setMuted(m) { isMuted = m; Object.values(audios).forEach(a => a.volume = (a._origVol || a.volume) * (m ? 0 : 1)); if (musicAudio) musicAudio.volume = musicVol * (m ? 0 : 1); }
+
+function initMixes() {
+  const MIX_VERSION = 3;
+  for (let i = 0; i < SCENE_COUNT; i++) {
+    const m = {};
+    PRESET_IDS[i].forEach(id => { const v = PRESET_VOL[i][id] || .5; m[id] = { vol: v, active: v >= .25 }; });
+    mixes[i] = m;
+  }
+  try {
+    const ver = localStorage.getItem('mixVersion');
+    if (parseInt(ver) === MIX_VERSION) {
+      const saved = localStorage.getItem('mixes');
+      if (saved) { const parsed = JSON.parse(saved); for (let i = 0; i < SCENE_COUNT; i++) { if (parsed[i]) mixes[i] = parsed[i]; } }
+    }
+  } catch (_) {}
+}
+function saveMixes() { try { localStorage.setItem('mixes', JSON.stringify(mixes)); localStorage.setItem('mixVersion', '3'); } catch (_) {} }
+
+// ═══════════════════ Scene switching ═══════════════════
+function switchScene(idx) {
+  if (idx === sceneIndex) return;
+  // Stop all sounds
+  Object.keys(audios).forEach(stopSnd);
+  const oldIdx = sceneIndex;
+  const newVid = videos[idx];
+
+  // Set src if not loaded yet (lazy load)
+  if (!newVid.src) {
+    newVid.src = SCENES[idx].video;
+    newVid.preload = 'auto';
+    newVid.load();
+  }
+
+  // Show loading overlay on target canvas
+  $('cv' + idx).classList.add('loading');
+
+  // Preload adjacent scenes
+  const prev = (idx - 1 + SCENE_COUNT) % SCENE_COUNT;
+  const next = (idx + 1) % SCENE_COUNT;
+  [prev, next].forEach(i => {
+    const v = videos[i];
+    if (!v.src && i !== idx) v.src = SCENES[i].video;
+    if (v.paused) v.load();
+  });
+
+  // Keep old scene visible as background until new video is ready
+  $('cv' + oldIdx).classList.remove('active');
+  $('cv' + oldIdx).classList.add('prev-active');
+
+  sceneIndex = idx;
+  updateIdleLayer();
+  updateCtrlBar();
+  // Set body background to scene tone while video loads
+  document.body.style.background = 'radial-gradient(ellipse at center,' + SCENES[idx].tone + '66 0%,#000 100%)';
+
+  // Wait for video to have enough data, then cross-fade
+  const onReady = () => {
+    newVid.removeEventListener('canplay', onReady);
+    newVid.removeEventListener('loadeddata', onReady);
+    $('cv' + idx).classList.remove('loading');
+    $('cv' + oldIdx).classList.remove('prev-active');
+    $('cv' + idx).classList.add('active');
+    newVid.play().catch(() => {});
+    // Apply new mix
+    applyMix();
+    saveMixes();
+  };
+  if (newVid.readyState >= 2) {
+    onReady();
+  } else {
+    newVid.addEventListener('canplay', onReady);
+    // Fallback: force the switch after 10s even if video never fires canplay
+    setTimeout(() => {
+      newVid.removeEventListener('canplay', onReady);
+      if ($('cv' + idx).classList.contains('loading')) onReady();
+    }, 10000);
+  }
+}
+
+// ═══════════════════ UI layers ═══════════════════
+let hideTimer = null;
+const HIDE_DELAY = 3000;
+
+function showCtrl() {
+  $('ctrlLayer').classList.add('visible');
+  clearTimeout(hideTimer);
+  hideTimer = setTimeout(hideCtrl, HIDE_DELAY);
+}
+function hideCtrl() {
+  if (activePanel) return; // don't hide panels while user is interacting
+  $('ctrlLayer').classList.remove('visible');
+  closeAllPanels();
+}
+function toggleCtrl() {
+  if ($('ctrlLayer').classList.contains('visible')) hideCtrl(); else showCtrl();
+}
+
+function updateIdleLayer() {
+  $('idleScene').textContent = SCENES[sceneIndex].icon + ' ' + SCENES[sceneIndex].name;
+  if (focusMode) updateFocusClock();
+}
+function updateCtrlBar() {
+  $('ctrlBar').querySelectorAll('.ctrl-scene-icon').forEach((btn, i) => {
+    btn.classList.toggle('active', i === sceneIndex);
+  });
+  // Heart
+  const favs = getFavorites();
+  const isFav = favs.some(f => f.scene === sceneIndex);
+  $('ctrlHeart').classList.toggle('active', isFav);
+}
+
+function updateClock() {
+  const now = new Date();
+  const t = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  $('idleTime').textContent = t;
+  $('ctrlClock').textContent = t;
+  if (focusMode) updateFocusClock();
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ═══════════════════ Panels ═══════════════════
+let activePanel = null;
+
+function openPanel(name) {
+  closeAllPanels();
+  activePanel = name;
+  if (name === 'sound') { $('soundOverlay').classList.add('open'); $('soundPanel').classList.add('open'); renderSoundPanel(); }
+  if (name === 'timer') { $('timerOverlay').classList.add('open'); $('timerPanel').classList.add('open'); updateTimerDisplay(); }
+}
+function closeAllPanels() {
+  ['sound','timer'].forEach(n => {
+    $(n + 'Overlay').classList.remove('open');
+    $(n + 'Panel').classList.remove('open');
+  });
+  activePanel = null;
+}
+
+// ── Sound panel ──
+let soundTab = 'noise';
+
+function renderSoundPanel() {
+  // Tab: white noise
+  const mix = mixes[sceneIndex] || {};
+  let html = '';
+  CATS.forEach(cat => {
+    let ids = cat.sounds;
+    if (cat.id === 'preset') ids = PRESET_IDS[sceneIndex];
+    if (!ids || ids.length === 0) return;
+    html += `<div style="font-size:13px;font-weight:500;opacity:.5;margin:12px 0 6px">${cat.name}</div><div class="sound-grid">`;
+    ids.forEach(id => {
+      const m = SMAP[id] || {};
+      const on = mix[id] && mix[id].active;
+      const vol = mix[id] ? Math.round((mix[id].vol || .5) * 100) : 50;
+      html += `<div class="sound-card${on ? ' on' : ''}" data-id="${id}">
+        <div class="s-row"><span class="s-icon">${m.icon || '🔊'}</span><span class="s-label">${m.label || id}</span><span class="s-vol">${vol}%</span></div>
+        <input type="range" min="0" max="100" value="${vol}">
+      </div>`;
+    });
+    html += '</div>';
+  });
+  $('tabNoise').innerHTML = html;
+}
+
+// Sound card click (delegated)
+$('tabNoise').addEventListener('click', e => {
+  const card = e.target.closest('.sound-card');
+  if (!card || e.target.tagName === 'INPUT') return;
+  const id = card.dataset.id;
+  const mix = mixes[sceneIndex];
+  if (!mix[id]) mix[id] = { vol: .5, active: false };
+  mix[id].active = !mix[id].active;
+  if (mix[id].active) playSnd(id, mix[id].vol); else stopSnd(id);
+  saveMixes();
+  card.classList.toggle('on', mix[id].active);
+});
+$('tabNoise').addEventListener('input', e => {
+  if (e.target.tagName !== 'INPUT') return;
+  const card = e.target.closest('.sound-card');
+  if (!card) return;
+  const id = card.dataset.id;
+  const mix = mixes[sceneIndex];
+  if (!mix[id]) mix[id] = { vol: .5, active: false };
+  const v = parseInt(e.target.value);
+  mix[id].vol = v / 100;
+  setVol(id, mix[id].vol);
+  const lbl = card.querySelector('.s-vol');
+  if (lbl) lbl.textContent = v + '%';
+  saveMixes();
+});
+
+// ── Timer ──
+let timerMode = 'clock';
+let timerRunning = false;
+let timerStart = 0;
+let timerElapsed = 0;
+let timerPomodoroPhase = 'work'; // 'work' | 'break'
+let timerInterval = null;
+
+function updateTimerDisplay() {
+  let display, label;
+  const now = new Date();
+  if (timerMode === 'clock') {
+    display = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    label = '当前时间';
+    $('timerActions').style.display = 'none';
+    $('timerSet').style.display = 'none';
+  } else if (timerMode === 'stopwatch') {
+    const total = timerRunning ? timerElapsed + (Date.now() - timerStart) / 1000 : timerElapsed;
+    const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), s = Math.floor(total % 60);
+    display = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    label = timerRunning ? '计时中' : '已停止';
+    $('timerActions').style.display = 'flex';
+    $('timerMainBtn').disabled = timerRunning;
+    $('timerSet').style.display = 'none';
+  } else if (timerMode === 'countdown') {
+    let remaining = timerRunning ? Math.max(0, timerElapsed - (Date.now() - timerStart) / 1000) : timerElapsed;
+    const h = Math.floor(remaining / 3600), m = Math.floor((remaining % 3600) / 60), s = Math.floor(remaining % 60);
+    display = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    label = timerRunning ? '倒计时中' : (remaining <= 0 ? '时间到！' : '已暂停');
+    $('timerActions').style.display = 'flex';
+    $('timerMainBtn').disabled = timerRunning;
+    $('timerSet').style.display = timerRunning ? 'none' : 'flex';
+    if (timerRunning && remaining <= 0) { stopTimer(); label = '时间到！'; notifyTimerEnd(); }
+  } else if (timerMode === 'pomodoro') {
+    const workSecs = (parseInt($('tsMin').value) || 25) * 60 + (parseInt($('tsSec').value) || 0);
+    const breakSecs = 5 * 60;
+    let total = timerPomodoroPhase === 'work' ? workSecs : breakSecs;
+    let remaining = timerRunning ? Math.max(0, total - (Date.now() - timerStart) / 1000) : (timerPomodoroPhase === 'work' ? workSecs : breakSecs);
+    const m = Math.floor(remaining / 60), s = Math.floor(remaining % 60);
+    display = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    label = timerPomodoroPhase === 'work' ? '🍅 专注中' : '☕ 休息中';
+    $('timerActions').style.display = 'flex';
+    $('timerMainBtn').disabled = timerRunning;
+    $('timerSet').style.display = timerRunning ? 'none' : 'flex';
+    if (timerRunning && remaining <= 0) {
+      notifyTimerEnd();
+      if (timerPomodoroPhase === 'work') {
+        timerPomodoroPhase = 'break';
+        timerElapsed = breakSecs;
+      } else {
+        timerPomodoroPhase = 'work';
+        timerElapsed = workSecs;
+      }
+      timerStart = Date.now();
+      label = timerPomodoroPhase === 'work' ? '🍅 专注中' : '☕ 休息中';
+    }
+  }
+  $('timerDisplay').textContent = display;
+  $('timerLabel').textContent = label;
+  updateCtrlTimerTxt();
+}
+
+function startTimer() {
+  if (timerMode === 'clock') return;
+  if (timerMode === 'countdown' || timerMode === 'pomodoro') {
+    const m = parseInt($('tsMin').value) || 25;
+    const s = parseInt($('tsSec').value) || 0;
+    timerElapsed = m * 60 + s;
+  }
+  timerRunning = true;
+  timerStart = Date.now();
+  if (!timerInterval) timerInterval = setInterval(updateTimerDisplay, 200);
+  updateTimerDisplay();
+  updateCtrlTimerTxt();
+}
+function stopTimer() {
+  if (timerRunning) { const dt = (Date.now() - timerStart) / 1000; timerElapsed = timerMode === 'countdown' ? Math.max(0, timerElapsed - dt) : (timerElapsed + dt); }
+  else if (timerMode === 'countdown' || timerMode === 'pomodoro') timerElapsed = (parseInt($('tsMin').value) || 25) * 60;
+  timerRunning = false;
+  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+  updateTimerDisplay();
+  updateCtrlTimerTxt();
+}
+function resetTimer() {
+  timerRunning = false;
+  timerElapsed = 0;
+  timerPomodoroPhase = 'work';
+  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+  updateTimerDisplay();
+  updateCtrlTimerTxt();
+}
+
+$('timerMainBtn').addEventListener('click', () => { if (!timerRunning) startTimer(); });
+$('timerResetBtn').addEventListener('click', resetTimer);
+
+function updateCtrlTimerTxt() {
+  const el = $('idleTimer');
+  if (!timerRunning || timerMode === 'clock') {
+    $('ctrlTimerTxt').textContent = '--:--';
+    el.classList.remove('active');
+    return;
+  }
+  const d = $('timerDisplay').textContent;
+  const label = timerMode === 'pomodoro' ? (timerPomodoroPhase === 'work' ? '🍅 ' : '☕ ') : '⏳ ';
+  $('ctrlTimerTxt').textContent = d.length > 5 ? d.substring(d.indexOf(':')+1) : d;
+  el.textContent = label + d;
+  el.classList.add('active');
+}
+
+function notifyTimerEnd() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [800, 600, 900].forEach((f, i) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = 'sine'; o.frequency.value = f;
+      g.gain.setValueAtTime(0.3, ctx.currentTime + i * 0.2);
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.2 + 0.4);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(ctx.currentTime + i * 0.2); o.stop(ctx.currentTime + i * 0.2 + 0.4);
+    });
+  } catch(_) {}
+}
+$('timerModes').addEventListener('click', e => {
+  const btn = e.target.closest('.timer-mode');
+  if (!btn) return;
+  stopTimer();
+  timerMode = btn.dataset.mode;
+  resetTimer();
+  $('timerModes').querySelectorAll('.timer-mode').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  $('timerMainBtn').style.display = timerMode === 'clock' ? 'none' : '';
+  $('timerResetBtn').style.display = timerMode === 'clock' ? 'none' : '';
+  updateTimerDisplay();
+});
+
+// ── Favorites ──
+function getFavorites() {
+  try { return JSON.parse(localStorage.getItem('favs') || '[]'); } catch (_) { return []; }
+}
+function saveFavorites(favs) { localStorage.setItem('favs', JSON.stringify(favs)); }
+function toggleFavorite() {
+  const favs = getFavorites();
+  const idx = favs.findIndex(f => f.scene === sceneIndex);
+  if (idx >= 0) { favs.splice(idx, 1); } else {
+    favs.push({ scene: sceneIndex, mix: JSON.parse(JSON.stringify(mixes[sceneIndex])), name: SCENES[sceneIndex].name, icon: SCENES[sceneIndex].icon, time: Date.now() });
+  }
+  saveFavorites(favs);
+  updateCtrlBar();
+  if (soundTab === 'fav' && activePanel === 'sound') renderFavTab();
+}
+function renderFavTab() {
+  const favs = getFavorites();
+  if (favs.length === 0) { $('favGrid').innerHTML = '<div style="text-align:center;padding:30px;opacity:.35">点击 ❤️ 收藏当前场景</div>'; return; }
+  $('favGrid').innerHTML = favs.map(f => `
+    <div class="fav-card" data-scene="${f.scene}">
+      <div class="fav-icon">${f.icon}</div>
+      <div class="fav-name">${f.name}</div>
+      <div class="fav-desc">${Object.values(f.mix).filter(v => v.active).length} 个音效</div>
+    </div>
+  `).join('');
+}
+$('favGrid').addEventListener('click', e => {
+  const card = e.target.closest('.fav-card');
+  if (!card) return;
+  const idx = parseInt(card.dataset.scene);
+  const favs = getFavorites();
+  const fav = favs.find(f => f.scene === idx);
+  if (fav) {
+    mixes[idx] = JSON.parse(JSON.stringify(fav.mix));
+    switchScene(idx);
+    closeAllPanels();
+  }
+});
+
+// ── NetEase music ──
+let musicAudio = null, musicCurrent = null, musicVol = 0.7, musicSearchTimer = null;
+
+async function searchMusic(q) {
+  if (!q.trim()) { $('musicResults').innerHTML = '<div class="music-empty">输入关键词搜索</div>'; return; }
+  $('musicResults').innerHTML = '<div class="music-empty">搜索中...</div>';
+  try {
+    const res = await fetch(MUSIC_PROXY + '/api/search?q=' + encodeURIComponent(q) + '&limit=12');
+    const data = await res.json();
+    if (!data.songs || data.songs.length === 0) { $('musicResults').innerHTML = '<div class="music-empty">未找到结果</div>'; return; }
+    renderMusicResults(data.songs);
+  } catch (e) { $('musicResults').innerHTML = '<div class="music-empty">搜索失败，请确认代理已启动</div>'; }
+}
+function renderMusicResults(songs) {
+  $('musicResults').innerHTML = songs.map(s => `<div class="music-row${musicCurrent && musicCurrent.id === s.id ? ' playing' : ''}" data-sid="${s.id}">
+    <div class="mu-icon">🎵</div>
+    <div class="mu-info"><div class="mu-name">${esc(s.name)}</div><div class="mu-art">${esc(s.artists)} · ${Math.floor(s.duration / 60)}:${String(s.duration % 60).padStart(2, '0')}</div></div>
+  </div>`).join('');
+}
+function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+async function playSong(song) {
+  if (musicAudio) { musicAudio.pause(); musicAudio.src = ''; }
+  musicCurrent = song;
+  $('nowPlaying').textContent = song.name; $('nowArtist').textContent = song.artists;
+  $('miniPlayer').style.display = 'flex';
+  $('miniPlayBtn').textContent = '⏸';
+  try {
+    const res = await fetch(MUSIC_PROXY + '/api/song-url?id=' + song.id);
+    const data = await res.json();
+    musicAudio = new Audio(data.url || `https://music.163.com/song/media/outer/url?id=${song.id}.mp3`);
+    musicAudio.volume = musicVol * (isMuted ? 0 : 1);
+    musicAudio.addEventListener('ended', () => { $('miniPlayBtn').textContent = '▶'; });
+    musicAudio.play().catch(() => { $('miniPlayBtn').textContent = '▶'; });
+  } catch (e) { $('miniPlayBtn').textContent = '▶'; }
+}
+function toggleMusic() {
+  if (!musicAudio || !musicCurrent) return;
+  if (musicAudio.paused) { musicAudio.play().catch(() => {}); $('miniPlayBtn').textContent = '⏸'; }
+  else { musicAudio.pause(); $('miniPlayBtn').textContent = '▶'; }
+}
+
+$('musicResults').addEventListener('click', e => {
+  const row = e.target.closest('.music-row');
+  if (!row) return;
+  playSong({ id: parseInt(row.dataset.sid), name: row.querySelector('.mu-name').textContent, artists: row.querySelector('.mu-art').textContent.split(' · ')[0] });
+});
+$('miniPlayBtn').addEventListener('click', toggleMusic);
+$('miniVol').addEventListener('input', e => { musicVol = parseInt(e.target.value) / 100; if (musicAudio) musicAudio.volume = musicVol * (isMuted ? 0 : 1); });
+$('musicSearch').addEventListener('input', () => { clearTimeout(musicSearchTimer); musicSearchTimer = setTimeout(() => searchMusic($('musicSearch').value), 400); });
+
+// ── Login ──
+let qrKey = null, qrPollTimer = null, loginMode = 'qr';
+
+async function checkLoginStatus() {
+  try {
+    const res = await fetch(MUSIC_PROXY + '/api/login/status');
+    const data = await res.json();
+    if (data.loggedIn) {
+      $('musicLoginBtn').textContent = '✅ ' + (data.profile?.nickname || '已登录');
+      $('musicLoginBtn').style.background = 'rgba(74,222,128,.15)';
+      $('musicLoginBtn').style.borderColor = 'rgba(74,222,128,.25)';
+    } else {
+      $('musicLoginBtn').textContent = '🔓 登录网易云';
+      $('musicLoginBtn').style.background = '';
+      $('musicLoginBtn').style.borderColor = '';
+    }
+  } catch (e) {}
+}
+
+async function startQrLogin() {
+  loginMode = 'qr';
+  $('loginTitle').textContent = '📱 扫码登录'; $('loginHint').style.display = '';
+  $('qrWrap').style.display = ''; $('qrText').style.display = '';
+  $('phoneFields').style.display = 'none'; $('switchLogin').textContent = '📱 使用手机号登录';
+  $('loginOverlay').classList.add('open');
+  $('qrText').textContent = '获取中...';
+
+  try {
+    const kr = await fetch(MUSIC_PROXY + '/api/login/qr/key');
+    const kd = await kr.json();
+    qrKey = kd.unikey;
+    if (!qrKey) { $('qrText').textContent = '获取失败'; return; }
+    const ir = await fetch(MUSIC_PROXY + '/api/login/qr/image?key=' + qrKey);
+    const ct = ir.headers.get('content-type') || '';
+    if (ct.startsWith('image/')) {
+      const blob = await ir.blob();
+      $('qrImg').src = URL.createObjectURL(blob);
+    } else {
+      const jd = await ir.json();
+      $('qrImg').src = jd.qrUrl ? 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent(jd.qrUrl) : '';
+    }
+    $('qrText').textContent = '请用网易云音乐 App 扫码';
+    if (qrPollTimer) clearInterval(qrPollTimer);
+    qrPollTimer = setInterval(async () => {
+      try {
+        const cr = await fetch(MUSIC_PROXY + '/api/login/qr/check?key=' + qrKey);
+        const cd = await cr.json();
+        if (cd.code === 800) { $('qrText').textContent = '过期，刷新中...'; clearInterval(qrPollTimer); setTimeout(() => { closeLogin(); startQrLogin(); }, 1500); }
+        if (cd.code === 802) $('qrText').textContent = '已扫描，请确认';
+        if (cd.code === 803) { $('qrText').textContent = '✅ 成功！'; clearInterval(qrPollTimer); await checkLoginStatus(); setTimeout(closeLogin, 800); }
+      } catch (e) {}
+    }, 1000);
+  } catch (e) { $('qrText').textContent = '失败: ' + e.message; }
+}
+
+function closeLogin() {
+  $('loginOverlay').classList.remove('open');
+  if (qrPollTimer) { clearInterval(qrPollTimer); qrPollTimer = null; }
+  $('qrImg').src = '';
+}
+
+$('switchLogin').addEventListener('click', () => {
+  if (loginMode === 'qr') {
+    loginMode = 'phone';
+    $('loginTitle').textContent = '📱 手机号登录'; $('loginHint').style.display = 'none';
+    $('qrWrap').style.display = 'none'; $('qrText').style.display = 'none';
+    $('phoneFields').style.display = 'block'; $('switchLogin').textContent = '📱 返回扫码';
+    if (qrPollTimer) { clearInterval(qrPollTimer); qrPollTimer = null; }
+  } else {
+    closeLogin(); setTimeout(startQrLogin, 300);
+  }
+});
+$('phoneSubmit').addEventListener('click', async () => {
+  const phone = $('phoneInput').value.trim(), pw = $('pwInput').value;
+  if (!phone || !pw) { $('phoneMsg').textContent = '请输入手机号和密码'; return; }
+  $('phoneMsg').textContent = '登录中...';
+  try {
+    const res = await fetch(MUSIC_PROXY + '/api/login/phone', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({phone,password:pw}) });
+    const data = await res.json();
+    if (data.ok) { $('phoneMsg').textContent = '✅ 成功！'; await checkLoginStatus(); setTimeout(closeLogin, 800); }
+    else $('phoneMsg').textContent = '❌ ' + (data.error || '失败');
+  } catch (e) { $('phoneMsg').textContent = '❌ 网络错误'; }
+});
+$('loginClose').addEventListener('click', closeLogin);
+
+// ═══════════════════ Event bindings ═══════════════════
+$('tapLayer').addEventListener('click', toggleCtrl);
+$('ctrlClose').addEventListener('click', hideCtrl);
+$('ctrlLeft').addEventListener('click', () => switchScene((sceneIndex - 1 + SCENE_COUNT) % SCENE_COUNT));
+$('ctrlRight').addEventListener('click', () => switchScene((sceneIndex + 1) % SCENE_COUNT));
+$('ctrlMute').addEventListener('click', e => { e.stopPropagation(); isMuted = !isMuted; setMuted(isMuted); $('ctrlMute').textContent = isMuted ? '🔇' : '🔊'; $('idleDot').style.background = isMuted ? 'rgba(255,100,100,.6)' : 'rgba(74,222,128,.7)'; });
+$('ctrlDim').addEventListener('click', e => { e.stopPropagation(); dimLevel = (dimLevel + 1) % 3; applyDim(); });
+$('ctrlFocus').addEventListener('click', e => { e.stopPropagation(); toggleFocus(); });
+$('ctrlHeart').addEventListener('click', e => { e.stopPropagation(); toggleFavorite(); });
+$('ctrlSettings').addEventListener('click', e => { e.stopPropagation(); openPanel('sound'); });
+$('ctrlTimerBtn').addEventListener('click', e => { e.stopPropagation(); openPanel('timer'); });
+$('ctrlBar').addEventListener('click', e => {
+  const icon = e.target.closest('.ctrl-scene-icon');
+  if (icon) { e.stopPropagation(); switchScene(parseInt(icon.dataset.scene)); }
+});
+
+$('soundOverlay').addEventListener('click', closeAllPanels);
+$('soundClose').addEventListener('click', closeAllPanels);
+$('timerOverlay').addEventListener('click', closeAllPanels);
+$('timerClose').addEventListener('click', closeAllPanels);
+
+$('soundTabs').addEventListener('click', e => {
+  const tab = e.target.closest('.panel-tab');
+  if (!tab) return;
+  soundTab = tab.dataset.tab;
+  $('soundTabs').querySelectorAll('.panel-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === soundTab));
+  $('tabNoise').style.display = soundTab === 'noise' ? '' : 'none';
+  $('tabMusic').style.display = soundTab === 'music' ? '' : 'none';
+  $('tabFav').style.display = soundTab === 'fav' ? '' : 'none';
+  if (soundTab === 'noise') renderSoundPanel();
+  if (soundTab === 'fav') renderFavTab();
+});
+$('musicLoginBtn').addEventListener('click', e => { e.stopPropagation(); startQrLogin(); });
+
+// Reset controls timer on any ctrl layer interaction
+$('ctrlLayer').addEventListener('pointerdown', () => { clearTimeout(hideTimer); hideTimer = setTimeout(hideCtrl, HIDE_DELAY); });
+['soundPanel','timerPanel'].forEach(id => $(id).addEventListener('click', e => { e.stopPropagation(); }));
+
+// Keyboard
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight') switchScene((sceneIndex + 1) % SCENE_COUNT);
+  if (e.key === 'ArrowLeft') switchScene((sceneIndex - 1 + SCENE_COUNT) % SCENE_COUNT);
+  if (e.key === 'm') { isMuted = !isMuted; setMuted(isMuted); $('ctrlMute').textContent = isMuted ? '🔇' : '🔊'; }
+  if (e.key === 'Escape') { closeAllPanels(); hideCtrl(); closeLogin(); }
+});
+
+// Swipe
+let touchStartX = 0, touchStartY = 0;
+$('tapLayer').addEventListener('touchstart', e => {
+  touchStartX = e.touches[0].clientX;
+  touchStartY = e.touches[0].clientY;
+}, { passive: true });
+$('tapLayer').addEventListener('touchend', e => {
+  const dx = e.changedTouches[0].clientX - touchStartX;
+  const dy = e.changedTouches[0].clientY - touchStartY;
+  if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) {
+    if (dx < 0) switchScene((sceneIndex + 1) % SCENE_COUNT);
+    else switchScene((sceneIndex - 1 + SCENE_COUNT) % SCENE_COUNT);
+  }
+});
+
+// ═══════════════════ Init ═══════════════════
+(function boot() {
+  createVideoCanvases();
+  resizeCanvases();
+  window.addEventListener('resize', resizeCanvases);
+
+  // Show first canvas immediately (no waiting for video)
+  $('cv0').classList.add('active');
+  initMixes();
+  applyMix();
+  updateIdleLayer();
+  updateCtrlBar();
+  drawFrame();
+  try { isMuted = localStorage.getItem('isMuted') === '1'; } catch (_) {}
+  setMuted(isMuted);
+  try { dimLevel = parseInt(localStorage.getItem('dimLevel')) || 0; } catch (_) {}
+  applyDim();
+  try { focusMode = parseInt(localStorage.getItem('focusMode')) || 0; } catch (_) {}
+  if (focusMode) { $('focusCard').classList.add('on'); if (focusMode === 2) $('focusCard').classList.add('style-b'); $('ctrlFocus').style.opacity = '1'; $('ctrlFocus').textContent = ['◎','◉','○'][focusMode]; updateFocusClock(); }
+  checkLoginStatus();
+  showCtrl();
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+
+  // Start loading first video in background — when ready, canvas shows it
+  const firstVid = videos[0];
+  firstVid.preload = 'auto';
+  firstVid.src = SCENES[0].video;
+  firstVid.load();
+  firstVid.play().catch(() => {});
+})();
+</script>
+</body>
+</html>
