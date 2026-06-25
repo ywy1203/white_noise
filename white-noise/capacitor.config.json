@@ -1,0 +1,13 @@
+{
+  "appId": "com.study.companion",
+  "appName": "WhiteNoise",
+  "webDir": "dist",
+  "server": {
+    "iosScheme": "capacitor"
+  },
+  "ios": {
+    "contentInset": "always",
+    "preferredContentMode": "mobile"
+  },
+  "packageManager": "npm"
+}
