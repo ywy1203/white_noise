@@ -34,14 +34,12 @@ export function useParticleEngine() {
     const s = new THREE.Scene()
     scene.value = s
 
-    // Camera
     const aspect = container.clientWidth / container.clientHeight
     const cam = new THREE.PerspectiveCamera(60, aspect, 0.1, 100)
     cam.position.set(0, 2, 12)
     cam.lookAt(0, 0, 0)
     camera.value = cam
 
-    // Renderer - pure black background per requirement
     const r = new THREE.WebGLRenderer({
       antialias: window.innerWidth > 768,
       alpha: false,
@@ -53,7 +51,6 @@ export function useParticleEngine() {
     container.appendChild(r.domElement)
     renderer.value = r
 
-    // Controls
     const ctrl = new OrbitControls(cam, r.domElement)
     ctrl.enableDamping = true
     ctrl.dampingFactor = 0.08
@@ -73,18 +70,22 @@ export function useParticleEngine() {
     if (!s) return
 
     if (config.id === 'campfire') {
-      // New emitter system
+      // Create all emitters
       emitters = createCampfireEmitters()
+      // Merge particles by layerId (multiple emitters can share same layerId)
       currentParticles = new Map()
       for (const em of emitters) {
         const map = em.getLayerMap()
-        for (const [k, v] of map) currentParticles.set(k, v)
+        for (const [k, v] of map) {
+          const existing = currentParticles.get(k)
+          if (existing) existing.push(...v)
+          else currentParticles.set(k, v)
+        }
       }
       const logs = generateLogs()
       staticLayers.set('log', logs)
       currentParticles.set('log', logs)
     } else {
-      // Legacy generation for other scenes
       const particles = generateParticles(config, isMobile)
       const layerMap = new Map<string, ParticleData[]>()
       for (const p of particles) {
