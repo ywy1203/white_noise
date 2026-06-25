@@ -71,7 +71,7 @@ export function useParticleEngine() {
 
     if (config.id === 'campfire') {
       // Create all emitters
-      emitters = createCampfireEmitters()
+      emitters = createCampfireEmitters(isMobile)
       // Merge particles by layerId (multiple emitters can share same layerId)
       currentParticles = new Map()
       for (const em of emitters) {
@@ -82,7 +82,7 @@ export function useParticleEngine() {
           else currentParticles.set(k, v)
         }
       }
-      const logs = generateLogs()
+      const logs = generateLogs(isMobile)
       staticLayers.set('log', logs)
       currentParticles.set('log', logs)
     } else {
