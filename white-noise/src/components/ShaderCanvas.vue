@@ -3,7 +3,7 @@
  * ShaderCanvas — nano-design 风格 WebGL2 全屏特效
  * 不需要 Three.js，直接用 shader 渲染火焰/雨水
  */
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { createFireEngine, type FireEngine, type FireParams } from '@/services/fireEngine'
 import { createRainEngine, type RainEngine, type RainParams } from '@/services/rainEngine'
 
@@ -17,9 +17,7 @@ let fireEngine: FireEngine | null = null
 let rainEngine: RainEngine | null = null
 let running = false
 let rafId = 0
-let isMobile = false
 
-// Default params for fire
 const fireParams: FireParams = {
   intensity: 1.0,
   flameHeight: 3.2,
@@ -31,7 +29,6 @@ const fireParams: FireParams = {
   colorOuter: [0.9, 0.25, 0.05],
 }
 
-// Default params for rain
 const rainParams: RainParams = {
   intensity: 0.8,
   speed: 1.0,
@@ -44,25 +41,35 @@ const rainParams: RainParams = {
 
 function init() {
   const el = container.value
+  console.log('[ShaderCanvas] init, el:', !!el, 'sceneId:', props.sceneId)
   if (!el) return
 
-  isMobile = window.innerWidth < 768
-  if (isMobile) {
-    rainParams.intensity = 0.5
-    rainParams.dropLength = 0.08
-  }
+  const w = el.clientWidth || window.innerWidth
+  const h = el.clientHeight || window.innerHeight
+  console.log('[ShaderCanvas] size:', w, 'x', h)
 
   if (props.sceneId === 'campfire') {
     fireEngine = createFireEngine()
+    console.log('[ShaderCanvas] fireEngine:', !!fireEngine)
     if (fireEngine) {
       el.appendChild(fireEngine.canvas)
-      fireEngine.resize(el.clientWidth, el.clientHeight)
+      fireEngine.resize(w, h)
+      console.log('[ShaderCanvas] fire canvas appended, size=', fireEngine.canvas.width, 'x', fireEngine.canvas.height)
+    } else {
+      el.textContent = 'WebGL2 not available'
+      el.style.cssText += ';color:#f00;display:flex;align-items:center;justify-content:center;font:16px sans-serif'
+      return
     }
   } else if (props.sceneId === 'rain') {
     rainEngine = createRainEngine()
+    console.log('[ShaderCanvas] rainEngine:', !!rainEngine)
     if (rainEngine) {
       el.appendChild(rainEngine.canvas)
-      rainEngine.resize(el.clientWidth, el.clientHeight)
+      rainEngine.resize(w, h)
+    } else {
+      el.textContent = 'WebGL2 not available'
+      el.style.cssText += ';color:#f00;display:flex;align-items:center;justify-content:center;font:16px sans-serif'
+      return
     }
   }
 
@@ -72,11 +79,12 @@ function init() {
 function start() {
   if (running) return
   running = true
+  console.log('[ShaderCanvas] animation loop starting')
 
   function loop() {
     if (!running) return
-    if (fireEngine) fireEngine.render(fireParams)
-    if (rainEngine) rainEngine.render(rainParams)
+    fireEngine?.render(fireParams)
+    rainEngine?.render(rainParams)
     rafId = requestAnimationFrame(loop)
   }
   loop()
@@ -94,8 +102,10 @@ function stop() {
 function onResize() {
   const el = container.value
   if (!el) return
-  fireEngine?.resize(el.clientWidth, el.clientHeight)
-  rainEngine?.resize(el.clientWidth, el.clientHeight)
+  const w = el.clientWidth
+  const h = el.clientHeight
+  fireEngine?.resize(w, h)
+  rainEngine?.resize(w, h)
 }
 
 onMounted(init)

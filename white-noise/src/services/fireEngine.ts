@@ -110,14 +110,14 @@ void main() {
   float flame = density * vertFalloff;
   flame = clamp(pow(flame, 1.2), 0.0, 1.0);
 
+  // Color blending
+  float distFromScreen = distFromCenter / max(profileWidth, 0.001);
+
   // ── Layered coloring ──
   // Core (bottom/center): bright → use highest density
   float coreMask = smoothstep(0.1, 0.0, distFromScreen) * smoothstep(0.3, 0.0, heightNorm);
   float outerMask = smoothstep(0.4, 0.7, heightNorm) * smoothstep(0.5, 1.0, distFromScreen);
   float midMask = 1.0 - coreMask - outerMask;
-
-  // Color blending
-  float distFromScreen = distFromCenter / max(profileWidth, 0.001);
 
   // Height-based color: bottom=yellow, top=orange-red
   float colorMixHeight = heightNorm;  // 0..1
