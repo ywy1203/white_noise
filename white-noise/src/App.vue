@@ -6,7 +6,7 @@ import { useUserStore } from '@/stores/userStore'
 import { useVideo } from '@/composables/useVideo'
 import { useAudio } from '@/composables/useAudio'
 import { useOrientation } from '@/composables/useOrientation'
-import ParticleCanvas from '@/components/ParticleCanvas.vue'
+import ShaderCanvas from '@/components/ShaderCanvas.vue'
 // import VideoCanvas from '@/components/VideoCanvas.vue'
 import CtrlBar from '@/components/CtrlBar.vue'
 import IdleLayer from '@/components/IdleLayer.vue'
@@ -93,7 +93,7 @@ watch(() => sceneStore.current, (idx, oldIdx) => {
     <div class="vignette"></div>
     <DimOverlay />
     <!-- <VideoCanvas /> -->
-    <ParticleCanvas scene-id="campfire" @loaded="console.log('particle scene loaded')" />
+    <ShaderCanvas scene-id="campfire" />
     <FocusCard />
     <IdleLayer :visible="!ctrlVisible" />
     <div class="tap-layer" @click="toggleCtrl"></div>
